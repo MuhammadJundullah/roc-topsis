@@ -10,8 +10,8 @@ export async function POST(req: Request) {
       alternatives,
       criteria,
       values,
-      criteriaTypes, // Ini akan menjadi array string 'benefit' | 'cost'
-      prioritizedCriteria, // Array string kriteria terurut
+      criteriaTypes, 
+      prioritizedCriteria,
     } = await req.json();
 
     // Validasi dasar

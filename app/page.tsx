@@ -8,12 +8,24 @@ import {
   RankingResult,
   QualitativeMapping,
   RawDataRow,
-} from "@/types"; // Import RawDataRow
+} from "@/types";
 import CriteriaConfig from "@/components/CriteriaConfig";
 
+// Untuk input manual
+interface ManualDataRow {
+  id: number;
+  alternativeName: string;
+  [key: string]: string | number; // Kriteria bisa string (untuk input awal) atau number
+}
+
 export default function HomePage() {
-  const [parsedRawData, setParsedRawData] = useState<RawDataRow[] | null>(null); // Ganti any[] menjadi RawDataRow[]
-  const [criteria, setCriteria] = useState<string[]>([]);
+  const [inputMode, setInputMode] = useState<"manual" | "csv">("csv"); // Default ke CSV
+  const [parsedRawData, setParsedRawData] = useState<RawDataRow[] | null>(null);
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]); // Menyimpan semua header dari CSV
+  const [selectedAltCol, setSelectedAltCol] = useState<string | null>(null); // Kolom yang dipilih untuk nama alternatif
+  const [selectedCritCols, setSelectedCritCols] = useState<string[]>([]); // Kolom yang dipilih untuk kriteria
+
+  const [criteria, setCriteria] = useState<string[]>([]); // Kriteria yang sudah difilter
   const [alternatives, setAlternatives] = useState<string[]>([]);
   const [matrixValues, setMatrixValues] = useState<number[][]>([]);
   const [criteriaTypes, setCriteriaTypes] = useState<{
@@ -28,47 +40,72 @@ export default function HomePage() {
     useState<QualitativeMapping>({});
   const [needsQualitativeMapping, setNeedsQualitativeMapping] = useState(false);
 
+  // State untuk input manual
+  const [manualData, setManualData] = useState<ManualDataRow[]>([
+    { id: Date.now(), alternativeName: "", },
+  ]);
+  const [manualCriteriaNames, setManualCriteriaNames] = useState<string[]>([]);
+  let nextManualRowId = useRef(Date.now());
+
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Fungsi untuk memproses data setelah parsing CSV
-  const processParsedData = (
-    data: RawDataRow[], // Ganti any[] menjadi RawDataRow[]
-    headers: string[],
-    altColName: string,
-    rawCriteria: string[]
+  // --- Utility functions ---
+  const resetAllDataStates = () => {
+    setParsedRawData(null);
+    setCsvHeaders([]);
+    setSelectedAltCol(null);
+    setSelectedCritCols([]);
+    setCriteria([]);
+    setAlternatives([]);
+    setMatrixValues([]);
+    setCriteriaTypes({});
+    setPrioritizedCriteria([]);
+    setRankingResults(null);
+    setUploadError(null);
+    setQualitativeMapping({});
+    setNeedsQualitativeMapping(false);
+    setManualData([{ id: Date.now(), alternativeName: "" }]);
+    setManualCriteriaNames([]);
+    nextManualRowId.current = Date.now();
+  };
+
+  // --- Fungsi Pemrosesan Data (setelah CSV di-parse atau data manual di-confirm) ---
+   const processFinalData = (
+    data: RawDataRow[],
+    altCol: string,
+    critCols: string[]
   ) => {
     const newAlternatives: string[] = [];
     const newMatrixValuesTemp: (number | string)[][] = [];
     const newQualitativeMapping: QualitativeMapping = {};
     let hasQualitativeData = false;
 
-    rawCriteria.forEach((crit) => {
+    critCols.forEach((crit) => {
       newQualitativeMapping[crit] = { uniqueValues: [], mapping: {} };
     });
 
     data.forEach((row: RawDataRow) => {
-      // Ganti any menjadi RawDataRow
-      const alternativeName = row[altColName];
-      if (!alternativeName) return;
+      const alternativeName = row[altCol];
+      if (!alternativeName || alternativeName.trim() === "") return; // Skip empty alt names
 
       newAlternatives.push(alternativeName);
       const currentRowValues: (number | string)[] = [];
 
-      rawCriteria.forEach((crit) => {
+      critCols.forEach((crit) => {
         const value = row[crit];
         const numericValue = parseFloat(value);
 
-        if (isNaN(numericValue) || value.trim() === "") {
+        if (isNaN(numericValue) || value === undefined || value === null || value.toString().trim() === "") {
           hasQualitativeData = true;
-          if (value.trim() !== "") {
-            if (
-              !newQualitativeMapping[crit].uniqueValues.includes(value.trim())
-            ) {
-              newQualitativeMapping[crit].uniqueValues.push(value.trim());
-              newQualitativeMapping[crit].mapping[value.trim()] = "";
+          if (value !== undefined && value !== null && value.toString().trim() !== "") {
+            const trimmedValue = value.toString().trim();
+            if (!newQualitativeMapping[crit].uniqueValues.includes(trimmedValue)) {
+              newQualitativeMapping[crit].uniqueValues.push(trimmedValue);
+              newQualitativeMapping[crit].mapping[trimmedValue] = "";
             }
           }
-          currentRowValues.push(value.trim());
+          currentRowValues.push(value !== undefined && value !== null ? value.toString().trim() : "");
         } else {
           currentRowValues.push(numericValue);
         }
@@ -77,8 +114,7 @@ export default function HomePage() {
     });
 
     setAlternatives(newAlternatives);
-    setCriteria(rawCriteria);
-    setParsedRawData(data);
+    setCriteria(critCols); // Kriteria sekarang adalah kolom yang dipilih
     setQualitativeMapping(newQualitativeMapping);
     setNeedsQualitativeMapping(hasQualitativeData);
 
@@ -89,34 +125,25 @@ export default function HomePage() {
     }
 
     const initialTypes: { [key: string]: CriteriaType } = {};
-    rawCriteria.forEach((crit) => (initialTypes[crit] = "benefit"));
+    critCols.forEach((crit) => (initialTypes[crit] = "benefit"));
     setCriteriaTypes(initialTypes);
-    setPrioritizedCriteria([...rawCriteria]);
+    setPrioritizedCriteria([...critCols]); // Urutan awal sesuai kriteria yang dipilih
+    setUploadError(null); // Clear errors if initial processing is fine
   };
 
+  // --- CSV Upload & Column Selection Handlers ---
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    setUploadError(null);
-    setParsedRawData(null);
-    setCriteria([]);
-    setAlternatives([]);
-    setMatrixValues([]);
-    setCriteriaTypes({});
-    setPrioritizedCriteria([]);
-    setRankingResults(null);
-    setQualitativeMapping({});
-    setNeedsQualitativeMapping(false);
+    resetAllDataStates(); // Reset all states on new file upload
 
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
         if (!results.data || results.data.length === 0) {
-          setUploadError(
-            "File CSV kosong atau tidak memiliki data yang valid setelah header."
-          );
+          setUploadError("File CSV kosong atau tidak memiliki data yang valid setelah header.");
           return;
         }
 
@@ -126,32 +153,106 @@ export default function HomePage() {
           return;
         }
 
-        const altColName = headers[0];
-        const rawCriteria = headers.slice(1);
-
-        if (rawCriteria.length === 0) {
-          setUploadError(
-            "File CSV tidak memiliki kolom kriteria yang valid (hanya ada kolom alternatif)."
-          );
-          return;
+        setParsedRawData(results.data as RawDataRow[]);
+        setCsvHeaders(headers);
+        // Default select first column as alternative, others as criteria (user can change)
+        if (headers.length > 0) {
+          setSelectedAltCol(headers[0]);
+          setSelectedCritCols(headers.slice(1));
         }
-
-        processParsedData(
-          results.data as RawDataRow[], // Ganti any[] menjadi RawDataRow[]
-          headers,
-          altColName,
-          rawCriteria
-        );
       },
       error: (error) => {
         console.error("Error parsing CSV:", error);
-        setUploadError(
-          `Gagal membaca file CSV: ${error.message}. Pastikan formatnya benar.`
-        );
+        setUploadError(`Gagal membaca file CSV: ${error.message}. Pastikan formatnya benar.`);
       },
     });
   };
 
+  const handleColumnSelectionConfirm = () => {
+    if (!parsedRawData || !selectedAltCol || selectedCritCols.length === 0) {
+      setUploadError("Harap pilih kolom untuk nama alternatif dan setidaknya satu kolom kriteria.");
+      return;
+    }
+
+    // Filter parsedRawData based on selected columns
+    const filteredData: RawDataRow[] = parsedRawData.map(row => {
+      const newRow: RawDataRow = { [selectedAltCol]: row[selectedAltCol] };
+      selectedCritCols.forEach(critCol => {
+        newRow[critCol] = row[critCol];
+      });
+      return newRow;
+    });
+
+    processFinalData(filteredData, selectedAltCol, selectedCritCols);
+  };
+
+  // --- Manual Input Handlers ---
+  const handleAddManualRow = () => {
+    setManualData((prev) => [
+      ...prev,
+      { id: nextManualRowId.current++, alternativeName: "", },
+    ]);
+  };
+
+  const handleDeleteManualRow = (id: number) => {
+    setManualData((prev) => prev.filter((row) => row.id !== id));
+  };
+
+  const handleManualRowChange = (
+    id: number,
+    field: string,
+    value: string | number
+  ) => {
+    setManualData((prev) =>
+      prev.map((row) => (row.id === id ? { ...row, [field]: value } : row))
+    );
+  };
+
+  const handleManualCriteriaNameChange = (index: number, newName: string) => {
+    setManualCriteriaNames(prev => {
+      const updatedNames = [...prev];
+      updatedNames[index] = newName;
+      return updatedNames;
+    });
+  };
+
+  const handleAddManualCriteria = () => {
+    setManualCriteriaNames(prev => [...prev, `Kriteria ${prev.length + 1}`]);
+    // Also add to existing manualData rows
+    setManualData(prev => prev.map(row => ({ ...row, [`Kriteria ${manualCriteriaNames.length + 1}`]: "" })));
+  };
+
+  const handleRemoveManualCriteria = () => {
+    if (manualCriteriaNames.length === 0) return;
+    const lastCrit = manualCriteriaNames[manualCriteriaNames.length - 1];
+    setManualCriteriaNames(prev => prev.slice(0, -1));
+    setManualData(prev => prev.map(row => {
+      const newRow = { ...row };
+      delete newRow[lastCrit];
+      return newRow;
+    }));
+  };
+
+
+  const handleManualDataConfirm = () => {
+    if (manualData.length === 0 || manualCriteriaNames.length === 0) {
+        setUploadError("Harap masukkan setidaknya satu alternatif dan satu kriteria untuk input manual.");
+        return;
+    }
+
+    // Convert manualData to RawDataRow[] format for processFinalData
+    const mappedRawData: RawDataRow[] = manualData.map(row => {
+        const newRow: RawDataRow = { "Alternatif": row.alternativeName }; // Use a generic key for alternative name
+        manualCriteriaNames.forEach(critName => {
+            newRow[critName] = row[critName]?.toString() || ""; // Ensure it's string
+        });
+        return newRow;
+    });
+
+    processFinalData(mappedRawData, "Alternatif", manualCriteriaNames);
+  };
+
+  // --- Qualitative Mapping Handlers ---
   const handleQualitativeMapChange = (
     criteriaName: string,
     qualitativeValue: string,
@@ -168,19 +269,33 @@ export default function HomePage() {
   };
 
   const convertMatrixAfterMapping = (): boolean => {
-    if (!parsedRawData || !criteria || !qualitativeMapping) {
+    if (!parsedRawData || !criteria || !qualitativeMapping) { // parsedRawData for CSV, but manual input needs mappedRawData (requires adjustment)
       setUploadError(
         "Data mentah atau pemetaan kualitatif tidak lengkap untuk konversi."
       );
       return false;
     }
 
+    // Determine the source of raw data (CSV or Manual)
+    const sourceData = inputMode === "csv" && parsedRawData ? parsedRawData :
+                       inputMode === "manual" ? manualData.map(row => {
+                         const obj: RawDataRow = { "Alternatif": row.alternativeName.toString() };
+                         manualCriteriaNames.forEach(critName => {
+                           obj[critName] = row[critName]?.toString() || "";
+                         });
+                         return obj;
+                       }) : [];
+
+    if (sourceData.length === 0) {
+        setUploadError("Tidak ada data valid yang tersedia untuk konversi.");
+        return false;
+    }
+
     const finalMatrixValues: number[][] = [];
     let conversionError = false;
     const errors: string[] = [];
 
-    parsedRawData.forEach((row: RawDataRow, rowIndex: number) => {
-      // Ganti any menjadi RawDataRow
+    sourceData.forEach((row: RawDataRow, rowIndex: number) => {
       const currentRowNumericValues: number[] = [];
       criteria.forEach((crit) => {
         const rawValue = row[crit];
@@ -190,7 +305,7 @@ export default function HomePage() {
         if (!isNaN(parsedNum)) {
           numericVal = parsedNum;
         } else {
-          const mappedVal = qualitativeMapping[crit]?.mapping[rawValue.trim()];
+          const mappedVal = qualitativeMapping[crit]?.mapping[rawValue.toString().trim()]; // Ensure rawValue is string
           if (
             mappedVal !== undefined &&
             mappedVal !== "" &&
@@ -258,6 +373,7 @@ export default function HomePage() {
     }
   };
 
+  // --- Criteria Configuration & Priority Handlers (passed to CriteriaConfig) ---
   const handleCriteriaTypeChange = (critName: string, type: CriteriaType) => {
     setCriteriaTypes((prev) => ({ ...prev, [critName]: type }));
   };
@@ -292,6 +408,7 @@ export default function HomePage() {
     setPrioritizedCriteria(newPriority);
   };
 
+  // --- Calculate Handler ---
   const handleCalculate = async () => {
     setRankingResults(null);
     setUploadError(null);
@@ -377,7 +494,6 @@ export default function HomePage() {
       const data = await response.json();
       setRankingResults(data.ranking);
     } catch (error: unknown) {
-      // Ganti 'any' dengan 'unknown'
       console.error("Error during calculation:", error);
       let clientErrorMessage = "An unknown error occurred during calculation.";
       if (error instanceof Error) {
@@ -397,92 +513,251 @@ export default function HomePage() {
         Sistem Pengambilan Keputusan (ROC-TOPSIS)
       </h1>
 
-      {/* Bagian 1: Unggah Data CSV */}
-      <section className="mb-8 p-6 border border-gray-300 rounded-lg shadow-md">
-        <h2 className="text-2xl font-semibold mb-4">1. Unggah Data CSV</h2>
-        <input
-          type="file"
-          accept=".csv"
-          onChange={handleFileUpload}
-          ref={fileInputRef}
-          className="block w-full text-sm text-gray-500
-            file:mr-4 file:py-2 file:px-4
-            file:rounded-full file:border-0
-            file:text-sm file:font-semibold
-            file:bg-blue-50 file:text-blue-700
-            hover:file:bg-blue-100"
-        />
-        <p className="mt-2 text-sm text-gray-600">
-          <small>
-            Asumsikan kolom pertama adalah nama alternatif, kolom selanjutnya
-            adalah kriteria.
-          </small>
-        </p>
+      {/* Bagian Pemilihan Mode Input */}
+      <section className="mb-8 p-6 border border-gray-300 rounded-lg shadow-md text-center">
+        <h2 className="text-2xl font-semibold mb-4">1. Pilih Mode Input Data</h2>
+        <div className="flex justify-center gap-4">
+          <button
+            onClick={() => { resetAllDataStates(); setInputMode("csv"); }}
+            className={`px-6 py-3 text-lg font-semibold rounded-full transition duration-200 ${
+              inputMode === "csv"
+                ? "bg-blue-600 text-white shadow-lg"
+                : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+            }`}
+          >
+            Upload File CSV
+          </button>
+          <button
+            onClick={() => { resetAllDataStates(); setInputMode("manual"); }}
+            className={`px-6 py-3 text-lg font-semibold rounded-full transition duration-200 ${
+              inputMode === "manual"
+                ? "bg-blue-600 text-white shadow-lg"
+                : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+            }`}
+          >
+            Input Data Manual
+          </button>
+        </div>
+      </section>
 
-        {uploadError && (
-          <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md">
-            <p className="font-bold">Kesalahan/Peringatan:</p>
-            <p className="whitespace-pre-line">{uploadError}</p>
-            <p className="mt-2">
-              <small>
-                Harap perbaiki file CSV Anda atau lengkapi pemetaan nilai.
-              </small>
-            </p>
-          </div>
-        )}
+      {/* Bagian Input CSV */}
+      {inputMode === "csv" && (
+        <section className="mb-8 p-6 border border-gray-300 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">2. Unggah File CSV</h2>
+          <input
+            type="file"
+            accept=".csv"
+            onChange={handleFileUpload}
+            ref={fileInputRef}
+            className="block w-full text-sm text-gray-500
+              file:mr-4 file:py-2 file:px-4
+              file:rounded-full file:border-0
+              file:text-sm file:font-semibold
+              file:bg-blue-50 file:text-blue-700
+              hover:file:bg-blue-100"
+          />
+          <p className="mt-2 text-sm text-gray-600">
+            <small>
+              Unggah file CSV Anda. Kolom pertama biasanya adalah nama alternatif.
+            </small>
+          </p>
 
-        {parsedRawData && (
-          <div className="mt-6">
-            <h3 className="text-xl font-medium mb-3">Pratinjau Data Asli:</h3>
-            <div className="overflow-x-auto">
-              <table className="min-w-full bg-white border border-gray-200 rounded-md">
-                <thead>
-                  <tr>
-                    {parsedRawData.length > 0 &&
-                      Object.keys(parsedRawData[0] as object).map(
-                        (header, idx) => (
+          {uploadError && (
+            <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md">
+              <p className="font-bold">Kesalahan/Peringatan:</p>
+              <p className="whitespace-pre-line">{uploadError}</p>
+              <p className="mt-2">
+                <small>
+                  Harap perbaiki file CSV Anda atau lengkapi pemetaan nilai.
+                </small>
+              </p>
+            </div>
+          )}
+
+          {parsedRawData && csvHeaders.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-xl font-medium mb-3">3. Pilih Kolom Data</h3>
+              <div className="mb-4">
+                <label htmlFor="alt-col-select" className="block text-gray-700 text-sm font-bold mb-2">
+                  Kolom Nama Alternatif:
+                </label>
+                <select
+                  id="alt-col-select"
+                  value={selectedAltCol || ""}
+                  onChange={(e) => setSelectedAltCol(e.target.value)}
+                  className="block w-full mt-1 py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                >
+                  <option value="">-- Pilih Kolom --</option>
+                  {csvHeaders.map((header) => (
+                    <option key={header} value={header}>{header}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-gray-700 text-sm font-bold mb-2">
+                  Kolom Kriteria (Pilih Lebih Dari Satu):
+                </label>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {csvHeaders.map((header) => (
+                    <label key={header} className="inline-flex items-center">
+                      <input
+                        type="checkbox"
+                        value={header}
+                        checked={selectedCritCols.includes(header)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedCritCols((prev) => [...prev, header]);
+                          } else {
+                            setSelectedCritCols((prev) =>
+                              prev.filter((col) => col !== header)
+                            );
+                          }
+                        }}
+                        className="form-checkbox h-5 w-5 text-blue-600 rounded"
+                      />
+                      <span className="ml-2 text-gray-700">{header}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="text-center">
+                <button
+                  onClick={handleColumnSelectionConfirm}
+                  className="px-6 py-3 text-lg font-semibold rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition duration-200"
+                >
+                  Konfirmasi Pilihan Kolom
+                </button>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-xl font-medium mb-3">Pratinjau Data Asli:</h3>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full bg-white border border-gray-200 rounded-md">
+                    <thead>
+                      <tr>
+                        {csvHeaders.map((header, idx) => (
                           <th
                             key={idx}
                             className="py-3 px-4 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                             {header}
                           </th>
-                        )
-                      )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {parsedRawData.slice(0, 5).map((row, rowIndex) => (
-                    <tr key={rowIndex} className="hover:bg-gray-50">
-                      {Object.values(row).map((val, colIndex) => (
-                        <td
-                          key={colIndex}
-                          className="py-3 px-4 border-b border-gray-200 text-sm text-gray-800">
-                          {val as React.ReactNode}
-                        </td>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedRawData.slice(0, 5).map((row, rowIndex) => (
+                        <tr key={rowIndex} className="hover:bg-gray-50">
+                          {csvHeaders.map((header, colIndex) => (
+                            <td
+                              key={colIndex}
+                              className="py-3 px-4 border-b border-gray-200 text-sm text-gray-800">
+                              {row[header] as React.ReactNode}
+                            </td>
+                          ))}
+                        </tr>
                       ))}
-                    </tr>
-                  ))}
-                  {parsedRawData.length > 5 && (
-                    <tr>
-                      <td
-                        colSpan={Object.keys(parsedRawData[0] as object).length}
-                        className="py-3 px-4 border-b border-gray-200 text-sm text-gray-500 text-center">
-                        ... {parsedRawData.length - 5} baris lainnya
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                      {parsedRawData.length > 5 && (
+                        <tr>
+                          <td
+                            colSpan={csvHeaders.length}
+                            className="py-3 px-4 border-b border-gray-200 text-sm text-gray-500 text-center">
+                            ... {parsedRawData.length - 5} baris lainnya
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </section>
+      )}
 
-      {/* Bagian 2: Pemetaan Nilai Kualitatif */}
-      {needsQualitativeMapping && (
+      {/* Bagian Input Manual */}
+      {inputMode === "manual" && (
+        <section className="mb-8 p-6 border border-gray-300 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">2. Input Data Manual</h2>
+          <div className="mb-4">
+            <button onClick={handleAddManualCriteria} className="mr-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700">
+              Tambah Kolom Kriteria
+            </button>
+            <button onClick={handleRemoveManualCriteria} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700">
+              Hapus Kolom Kriteria Terakhir
+            </button>
+          </div>
+          <div className="overflow-x-auto mb-6">
+            <table className="min-w-full bg-white border border-gray-200 rounded-md">
+              <thead>
+                <tr>
+                  <th className="py-2 px-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    Alternatif
+                  </th>
+                  {manualCriteriaNames.map((critName, index) => (
+                    <th key={index} className="py-2 px-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                      <input
+                        type="text"
+                        value={critName}
+                        onChange={(e) => handleManualCriteriaNameChange(index, e.target.value)}
+                        className="w-full bg-transparent border-b border-gray-400 focus:outline-none"
+                        placeholder="Nama Kriteria"
+                      />
+                    </th>
+                  ))}
+                  <th className="py-2 px-3 border-b-2 border-gray-200 bg-gray-100"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {manualData.map((row) => (
+                  <tr key={row.id}>
+                    <td className="py-2 px-3 border-b border-gray-200 text-sm text-gray-800">
+                      <input
+                        type="text"
+                        value={row.alternativeName}
+                        onChange={(e) => handleManualRowChange(row.id, "alternativeName", e.target.value)}
+                        className="w-full p-1 border border-gray-300 rounded"
+                        placeholder="Nama Alternatif"
+                      />
+                    </td>
+                    {manualCriteriaNames.map((critName, index) => (
+                      <td key={index} className="py-2 px-3 border-b border-gray-200 text-sm text-gray-800">
+                        <input
+                          type="text" // Type text to allow qualitative values initially
+                          value={row[critName]?.toString() || ""}
+                          onChange={(e) => handleManualRowChange(row.id, critName, e.target.value)}
+                          className="w-full p-1 border border-gray-300 rounded"
+                          placeholder="Nilai"
+                        />
+                      </td>
+                    ))}
+                    <td className="py-2 px-3 border-b border-gray-200">
+                      <button onClick={() => handleDeleteManualRow(row.id)} className="text-red-500 hover:text-red-700">
+                        Hapus
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-center">
+            <button onClick={handleAddManualRow} className="mr-4 px-6 py-3 text-lg font-semibold rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700">
+              Tambah Baris Alternatif
+            </button>
+            <button onClick={handleManualDataConfirm} className="px-6 py-3 text-lg font-semibold rounded-full bg-green-600 text-white shadow-lg hover:bg-green-700">
+              Konfirmasi Data Manual
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Bagian 3: Pemetaan Nilai Kualitatif (Hanya tampil jika ada data dan perlu pemetaan) */}
+      { (inputMode === "csv" && parsedRawData && needsQualitativeMapping) || (inputMode === "manual" && manualData.length > 0 && needsQualitativeMapping) ? (
         <section className="mb-8 p-6 border border-yellow-300 bg-yellow-50 rounded-lg shadow-md">
           <h2 className="text-2xl font-semibold mb-4 text-yellow-800">
-            2. Pemetaan Nilai Kualitatif
+            {inputMode === "csv" ? "4." : "3."} Pemetaan Nilai Kualitatif
           </h2>
           <p className="mb-4 text-yellow-700">
             Kami mendeteksi nilai non-angka pada beberapa kriteria. Harap
@@ -531,11 +806,14 @@ export default function HomePage() {
             </button>
           </div>
         </section>
-      )}
+      ) : null}
 
-      {/* Bagian 3: Konfigurasi Kriteria (Hanya tampil jika tidak ada pemetaan kualitatif yang tertunda) */}
-      {criteria.length > 0 && !needsQualitativeMapping && (
+      {/* Bagian 4/5: Konfigurasi Kriteria (Hanya tampil jika matriks sudah dikonversi & tidak ada pemetaan tertunda) */}
+      {matrixValues.length > 0 && !needsQualitativeMapping && (
         <section className="mb-8 p-6 border border-gray-300 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">
+            {inputMode === "csv" ? "4." : "3."} Konfigurasi Kriteria
+          </h2>
           <CriteriaConfig
             criteria={criteria}
             criteriaTypes={criteriaTypes}
@@ -546,10 +824,10 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Bagian 4: Tombol Hitung (Hanya tampil jika tidak ada pemetaan kualitatif yang tertunda) */}
-      {criteria.length > 0 && !needsQualitativeMapping && (
+      {/* Bagian 5/6: Tombol Hitung (Hanya tampil jika matriks sudah dikonversi & tidak ada pemetaan tertunda) */}
+      {matrixValues.length > 0 && !needsQualitativeMapping && (
         <section className="mb-8 p-6 border border-gray-300 rounded-lg shadow-md text-center">
-          <h2 className="text-2xl font-semibold mb-4">4. Hitung Ranking</h2>
+          <h2 className="text-2xl font-semibold mb-4">{inputMode === "csv" ? "5." : "4."} Hitung Ranking</h2>
           <button
             onClick={handleCalculate}
             className="px-6 py-3 text-lg font-semibold rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition duration-200">
@@ -558,10 +836,10 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Bagian 5: Hasil Ranking */}
+      {/* Bagian 6/7: Hasil Ranking */}
       {rankingResults && (
         <section className="mt-8 p-6 border border-gray-300 rounded-lg shadow-md">
-          <h2 className="text-2xl font-semibold mb-4">5. Hasil Ranking</h2>
+          <h2 className="text-2xl font-semibold mb-4">{inputMode === "csv" ? "6." : "5."} Hasil Ranking</h2>
           <div className="overflow-x-auto">
             <table className="min-w-full bg-white border border-gray-200 rounded-md">
               <thead>
