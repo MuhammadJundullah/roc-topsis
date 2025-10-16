@@ -6,12 +6,11 @@ import { useProjectState } from "@/app/hooks/useProjectState";
 
 interface Props {
   state: ReturnType<typeof useProjectState>["state"];
-  setState: ReturnType<typeof useProjectState>["setState"];
   handleCalculate: () => void;
   handleSaveProject: () => void;
 }
 
-export const CalculationRunner: React.FC<Props> = ({ state, setState, handleCalculate, handleSaveProject }) => {
+export const CalculationRunner: React.FC<Props> = ({ state, handleCalculate, handleSaveProject }) => {
   const { matrixValues, needsQualitativeMapping, inputMode, projectId } = state;
 
   if (matrixValues.length === 0 || needsQualitativeMapping) {

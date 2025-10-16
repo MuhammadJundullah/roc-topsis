@@ -3,7 +3,7 @@
 
 import React, { useRef, useCallback } from "react";
 import Papa from "papaparse";
-import { useProjectState, ProjectDataType, ManualDataRow } from "@/app/hooks/useProjectState";
+import { useProjectState } from "@/app/hooks/useProjectState";
 import { RawDataRow } from "@/types";
 
 interface Props {

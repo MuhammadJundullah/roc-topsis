@@ -2,7 +2,7 @@
 "use client";
 
 import React from "react";
-import { useProjectState } from "@/hooks/useProjectState";
+import { useProjectState } from "@/app/hooks/useProjectState";
 
 interface Props {
   state: ReturnType<typeof useProjectState>["state"];

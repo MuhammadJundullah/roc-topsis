@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useCallback, useRef } from "react";
-import { useProjectState, ManualDataRow } from "@/app/hooks/useProjectState";
+import { useProjectState } from "@/app/hooks/useProjectState";
 import { RawDataRow } from "@/types";
 
 interface Props {

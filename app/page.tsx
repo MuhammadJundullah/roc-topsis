@@ -279,7 +279,7 @@ export default function HomePage() {
 
           <CriteriaConfig state={state} setState={setState} />
 
-          <CalculationRunner state={state} setState={setState} handleCalculate={handleCalculate} handleSaveProject={handleSaveProject} />
+          <CalculationRunner state={state} handleCalculate={handleCalculate} handleSaveProject={handleSaveProject} />
 
           <ResultsDisplay state={state} />
         </>

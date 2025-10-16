@@ -12,7 +12,7 @@ interface Props {
 }
 
 export const ProjectManagement: React.FC<Props> = ({ state, setState, resetState, loadProject }) => {
-  const { projectName, projectId, showLoadProjectModal, savedProjects, loadProjectError, uploadError } = state;
+  const { projectName, showLoadProjectModal, savedProjects, loadProjectError, uploadError } = state;
 
   const handleCreateNewProject = async () => {
     if (!projectName.trim()) {

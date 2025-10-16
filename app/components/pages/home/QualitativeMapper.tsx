@@ -3,7 +3,7 @@
 
 import React, { useCallback } from "react";
 import { useProjectState } from "@/app/hooks/useProjectState";
-import { QualitativeMapping } from "@/types";
+
 
 interface Props {
   state: ReturnType<typeof useProjectState>["state"];
