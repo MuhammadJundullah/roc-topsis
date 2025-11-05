@@ -1,18 +1,52 @@
 // app/api/calculate/route.ts
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { calculateROCBobots } from "../../../lib/roc";
 import { runTOPSIS } from "../../../lib/topsis";
 import { CriteriaType, TOPSISInputData } from "../../../types"; // Import tipe
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const {
       alternatives,
       criteria,
       values,
-      criteriaTypes, 
+      criteriaTypes,
       prioritizedCriteria,
+      recaptchaToken,
     } = await req.json();
+
+    // reCAPTCHA verification
+    if (!recaptchaToken) {
+      return NextResponse.json(
+        { message: "reCAPTCHA token is missing." },
+        { status: 400 }
+      );
+    }
+
+    const secretKey = process.env.RECAPTCHA_SECRET_KEY;
+
+    if (!secretKey) {
+      console.error("RECAPTCHA_SECRET_KEY is not defined.");
+      return NextResponse.json(
+        { message: "Server configuration error: reCAPTCHA secret key missing." },
+        { status: 500 }
+      );
+    }
+
+    const verificationUrl = `https://www.google.com/recaptcha/api/siteverify?secret=${secretKey}&response=${recaptchaToken}`;
+    const recaptchaResponse = await fetch(verificationUrl, {
+      method: "POST",
+    });
+
+    const recaptchaData = await recaptchaResponse.json();
+
+    if (!recaptchaData.success) { // reCAPTCHA v2 only checks for success
+      console.error("reCAPTCHA verification failed:", recaptchaData);
+      return NextResponse.json(
+        { message: "reCAPTCHA verification failed. Please complete the challenge." },
+        { status: 403 }
+      );
+    }
 
     // Validasi dasar
     if (

@@ -1,8 +1,9 @@
 // app/page.tsx
 "use client";
 
-import React, { useState, useRef, useCallback } from "react"; // Tambah useCallback
+import React, { useState, useRef, useCallback } from "react";
 import Papa from "papaparse";
+import ReCAPTCHA from "react-google-recaptcha";
 import {
   CriteriaType,
   RankingResult,
@@ -91,6 +92,8 @@ export default function HomePage() {
   ]);
   const [manualCriteriaNames, setManualCriteriaNames] = useState<string[]>([]);
   const nextManualRowId = useRef(Date.now());
+
+  const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
 
   // States & Handlers for Project History
   const [projectName, setProjectName] = useState<string>("");
@@ -733,9 +736,14 @@ export default function HomePage() {
     [criteria, prioritizedCriteria]
   );
 
-  const handleCalculate = async () => {
+    const handleCalculate = async () => {
     setRankingResults(null);
     setUploadError(null);
+
+    if (!recaptchaToken) {
+      setUploadError("Please complete the reCAPTCHA challenge.");
+      return;
+    }
 
     if (needsQualitativeMapping) {
       alert(
@@ -807,6 +815,7 @@ export default function HomePage() {
           values: matrixValues,
           criteriaTypes: criteria.map((crit) => criteriaTypes[crit]),
           prioritizedCriteria,
+          recaptchaToken, // Include the reCAPTCHA token
         }),
       });
 
@@ -831,12 +840,24 @@ export default function HomePage() {
     }
   };
 
+  console.log("ReCAPTCHA Site Key:", process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY);
+
   // --- Render UI ---
   return (
     <div className="container mx-auto p-6 font-sans">
       <h1 className="text-3xl font-bold text-center mb-8">
         Sistem Pengambilan Keputusan (ROC-TOPSIS)
       </h1>
+
+      <section className="mb-8 p-6 border border-gray-300 rounded-lg shadow-md text-center">
+        <h2 className="text-2xl font-semibold mb-4">Verifikasi Keamanan</h2>
+        <div className="flex justify-center">
+          <ReCAPTCHA
+            sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || ""}
+            onChange={(token) => setRecaptchaToken(token)}
+          />
+        </div>
+      </section>
 
       {/* Bagian Manajemen Proyek: Selalu Tampil di Awal */}
       <section className="mb-8 p-6 border border-gray-300 rounded-lg shadow-md">
@@ -1392,6 +1413,13 @@ export default function HomePage() {
           )}
         </>
       )}
+      <footer className="mt-8 text-center text-gray-500 text-sm">
+        <p>
+          This site is protected by reCAPTCHA and the Google
+          <a href="https://policies.google.com/privacy" className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer"> Privacy Policy</a> and
+          <a href="https://policies.google.com/terms" className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer"> Terms of Service</a> apply.
+        </p>
+      </footer>
     </div>
   );
 }
